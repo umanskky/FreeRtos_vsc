@@ -1,3 +1,6 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <conio.h>
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -26,8 +29,20 @@ queue send software timer respectively. */
 #define mainNO_KEY_PRESS_VALUE              ( -1 )
 #define mainRESET_TIMER_KEY                 ( 'r' )
 
-/*-----------------------------------------------------------*/
+/* This demo allows for users to perform actions with the keyboard. */
+#define mainNO_KEY_PRESS_VALUE               ( -1 )
+#define mainOUTPUT_TRACE_KEY                  't'
+#define mainINTERRUPT_NUMBER_KEYBOARD         3
 
+static HANDLE xWindowsKeyboardInputThreadHandle = NULL;
+static int xKeyPressed = mainNO_KEY_PRESS_VALUE;
+
+void vBlinkyKeyboardInterruptHandler( int xKeyPressed );
+static uint32_t prvKeyboardInterruptHandler( void );
+static DWORD WINAPI prvWindowsKeyboardInputThread( void * pvParam );
+
+/*-----------------------------------------------------------*/
+uint32_t pers = 0;
 /*
  * The tasks as described in the comments at the top of this file.
  */
@@ -96,6 +111,18 @@ const TickType_t xTimerPeriod = mainTIMER_SEND_FREQUENCY_MS;
 
 int main(void)
 {
+	/* Set interrupt handler for keyboard input. */
+    vPortSetInterruptHandler( mainINTERRUPT_NUMBER_KEYBOARD, prvKeyboardInterruptHandler );
+	xWindowsKeyboardInputThreadHandle = CreateThread(
+    	 NULL,                          /* Pointer to thread security attributes. */
+     	0,                             /* Initial thread stack size, in bytes. */
+     	prvWindowsKeyboardInputThread, /* Pointer to thread function. */
+     	NULL,                          /* Argument for new thread. */
+     	0,                             /* Creation flags. */
+     	NULL);
+
+ 	/* Use the cores that are not used by the FreeRTOS tasks for the Windows thread. */
+ 	SetThreadAffinityMask( xWindowsKeyboardInputThreadHandle, ~0x01u );
     main_blinky();
 
     return 0;
@@ -178,7 +205,8 @@ uint32_t ulReceivedValue;
             console output) from a FreeRTOS task. */
             if (ulReceivedValue == mainVALUE_SENT_FROM_TASK)
             {
-                //printf("Message received from task - idle time %llu%%\r\n", ulTaskGetIdleRunTimePercent());
+				//pers = ulTaskGetIdleRunTimePercent();
+                //printf("Message received from task - idle time %u%%\r\n", pers);
                 printf("Message received from task - idle time\r\n");
             }
             else if (ulReceivedValue == mainVALUE_SENT_FROM_TIMER)
@@ -222,6 +250,61 @@ void vBlinkyKeyboardInterruptHandler( int xKeyPressed )
     default:
         break;
     }
+}
+
+/*
+ * Interrupt handler for when keyboard input is received.
+ */
+static uint32_t prvKeyboardInterruptHandler(void)
+{
+    /* Handle keyboard input. */
+    switch (xKeyPressed)
+    {
+    case mainNO_KEY_PRESS_VALUE:
+        break;
+    case mainOUTPUT_TRACE_KEY:
+        /* Saving the trace file requires Windows system calls, so enter a critical
+           section to prevent deadlock or errors resulting from calling a Windows
+           system call from within the FreeRTOS simulator. */
+        //portENTER_CRITICAL();
+       // {
+           // ( void ) xTraceDisable();
+          // prvSaveTraceFile();
+           // ( void ) xTraceEnable(TRC_START);
+        //}
+        //portEXIT_CRITICAL();
+        break;
+    default:
+        
+            {
+                /* Call the keyboard interrupt handler for the blinky demo. */
+                vBlinkyKeyboardInterruptHandler( xKeyPressed );
+            }
+       
+    break;
+    }
+
+    /* This interrupt does not require a context switch so return pdFALSE */
+    return pdFALSE;
+}
+
+static DWORD WINAPI prvWindowsKeyboardInputThread( void * pvParam )
+{
+    ( void ) pvParam;
+
+    for ( ; ; )
+    {
+        /* Block on acquiring a key press. */
+        xKeyPressed = _getch();
+        
+        /* Notify FreeRTOS simulator that there is a keyboard interrupt.
+         * This will trigger prvKeyboardInterruptHandler.
+         */
+        vPortGenerateSimulatedInterrupt( mainINTERRUPT_NUMBER_KEYBOARD );
+    }
+
+    /* Should not get here so return negative exit status. */
+    return -1;
 }
 
 /*
